@@ -13,6 +13,8 @@ from embedData import readXlsx, embedFlightData
 from utils import checkConnection, get_reward, update_state
 from CrewPairingEnv import CrewPairingEnv
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 # Hyperparameters
 learning_rate = 0.005
 gamma = 0.98
@@ -40,9 +42,13 @@ class ReplayBuffer():
             s_prime_lst.append(s_prime)
             done_mask_lst.append([done_mask])
 
-        return torch.tensor(s_lst, dtype=torch.float), torch.tensor(a_lst), \
-               torch.tensor(r_lst), torch.tensor(s_prime_lst, dtype=torch.float), \
-               torch.tensor(done_mask_lst)
+        return (
+            torch.tensor(s_lst, dtype=torch.float, device=device),
+            torch.tensor(a_lst, device=device),
+            torch.tensor(r_lst, device=device),
+            torch.tensor(s_prime_lst, dtype=torch.float, device=device),
+            torch.tensor(done_mask_lst, device=device)
+        )
     
     def size(self):
         return len(self.buffer)
@@ -55,7 +61,10 @@ class Qnet(nn.Module):
         self.fc3 = nn.Linear(128, 2)
 
     def forward(self, x):
-        x = torch.tensor(x, dtype=torch.float32)
+        if not torch.is_tensor(x):
+            x = torch.tensor(x, dtype=torch.float32, device=device)
+        else:
+            x = x.to(device)
 
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
@@ -121,10 +130,13 @@ def main():
 
     # Load Crew Pairing Environment
     env = CrewPairingEnv(V_f_list, flight_list, airport_total)
-    q = Qnet(NN_size)
+    q = Qnet(NN_size).to(device)
     
     # eval에 사용할 저장된 모델 불러오기
-    loaded_model = torch.load(os.path.join(models_directory, f'dqn_model_{month}_{episodes}_{excutionId}.pth'))
+    loaded_model = torch.load(
+        os.path.join(models_directory, f'dqn_model_{month}_{episodes}_{excutionId}.pth'),
+        map_location=device
+    )
     q.load_state_dict(loaded_model)
     q.eval()
 
