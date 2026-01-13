@@ -3,6 +3,7 @@ build/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
+crew-pairing.jar
 
 ### IntelliJ IDEA ###
 .idea/modules.xml
@@ -47,3 +48,4 @@ bin/
 ### Data ###
 *.xlsx
 *.zip
+data/crewpairing/
