@@ -11,82 +11,77 @@ import org.optaplanner.core.api.score.buildin.hardsoftlong.HardSoftLongScore;
 import org.optaplanner.core.api.score.constraint.ConstraintMatchTotal;
 import org.optaplanner.core.api.solver.SolutionManager;
 import org.optaplanner.persistence.common.api.domain.solution.SolutionFileIO;
+import org.dongguk.crewpairing.util.RandomPairingGenerator;
 
 import java.util.*;
-import java.util.List;
 
 @Slf4j
 public class PairingApp extends CommonApp<PairingSolution> {
     public static final String SOLVER_CONFIG = "solverConfig.xml";
 
     public static void main(String[] args) {
-        String dataDirPath = args.length > 0 ? args[0] : null;
-        String dataDirName = args.length > 1 ? args[1] : null;
-        String flightSize = args.length > 2 ? args[2] : null;
-        String informationXlsxFile = args.length > 3 ? args[3] : null;
-        String pairingXlsxFile = args.length > 4 ? args[4] : null;
-
-        assert flightSize != null;
-        SolutionBusiness<PairingSolution, ?> business = new PairingApp(dataDirPath, dataDirName, informationXlsxFile)
-                .init(Integer.valueOf(flightSize)).getSolutionBusiness();
-
-        // Input Information Xlsx File
-        business.openSolution(
-                business.getInputFileList()
-                        .stream()
-                        .filter(inputFile -> inputFile.getName().equals(informationXlsxFile))
-                        .findFirst().orElseThrow(() -> new IllegalArgumentException("파일이 존재하지 않습니다.")));
-
-        if (pairingXlsxFile != null) {
-            FlightCrewPairingXlsxFileIO xlsxFileIO = new FlightCrewPairingXlsxFileIO();
-            List<Flight> flightList = business.getSolution().getFlightList();
-            List<Pairing> pairingList = xlsxFileIO.readPairingList(flightList, business.getOutputFileList()
-                    .stream()
-                    .filter(outputFile -> outputFile.getName().equals(pairingXlsxFile))
-                    .findFirst().orElseGet(() -> null));
-            business.getSolution().setPairingList(pairingList);
-
-            System.out.println(flightList);
-            for(Flight f : flightList){
-                System.out.println(f);
-            }
+        System.setIn(new java.io.ByteArrayInputStream("p\n".getBytes()));
+        
+        // 인자 개수 체크 (최소 7개 필요: dqn 모드 대비)
+        if (args.length < 6) {
+            System.out.println("Usage: java -jar app.jar <dirPath> <dirName> <flightSize> <inputXlsx> <mode> <iter> [pairingXlsx] <timeLimit>");
+            return;
         }
 
-        // Solve By SolverJob
+        String dataDirPath = args[0];
+        String dataDirName = args[1];
+        Integer flightSize = Integer.valueOf(args[2]);
+        String informationXlsxFile = args[3];
+        String mode = args[4]; // opis, kbra, dqn
+        
+        int stepLimit;
+        long timeLimitMs;
+        String pairingXlsxFile = null;
+
+        // 인자 파싱 (모드별로 인자 위치가 다를 수 있음을 고려)
+        if ("dqn".equals(mode)) {
+            pairingXlsxFile = args[5];
+            stepLimit = Integer.parseInt(args[6]);
+            timeLimitMs = Long.parseLong(args[7]);
+        } else {
+            stepLimit = Integer.parseInt(args[5]);
+            timeLimitMs = Long.parseLong(args[6]);
+        }
+
+        // 비즈니스 로직 초기화 (Step 및 Time 제한 전달)
+        SolutionBusiness<PairingSolution, ?> business = new PairingApp(dataDirPath, dataDirName, informationXlsxFile)
+                .init(flightSize, stepLimit, timeLimitMs).getSolutionBusiness();
+
+        // 엑셀 데이터 로드
+        business.openSolution(business.getInputFileList().stream()
+                .filter(f -> f.getName().equals(informationXlsxFile))
+                .findFirst().orElseThrow());
+
+        // [모드별 초기해 처리]
+        if ("kbra".equals(mode)) {
+            List<Flight> flightList = business.getSolution().getFlightList();
+            List<Pairing> randomPairings = RandomPairingGenerator.generate(flightList, 4, 42L);
+            business.getSolution().setPairingList(randomPairings);
+            System.out.println("[KBRA] Random initial solution generated.");
+        } else if ("dqn".equals(mode) && pairingXlsxFile != null) {
+            FlightCrewPairingXlsxFileIO xlsxIO = new FlightCrewPairingXlsxFileIO();
+            List<Pairing> pairings = xlsxIO.readPairingList(business.getSolution().getFlightList(), 
+                business.getOutputFileList().stream().filter(f -> f.getName().equals(args[5])).findFirst().orElse(null));
+            business.getSolution().setPairingList(pairings);
+            System.out.println("[DQN] Initial solution loaded from: " + pairingXlsxFile);
+        }
+
+        // 최적화 시작
         business.solve(business.getSolution());
 
-        // Solution 출력
-        PairingSolution solution = business.getSolution();
-        System.out.println(solution);
-
-        solution.printScore();
-
-        // Check score detail
-        SolutionManager<PairingSolution, HardSoftLongScore> scoreManager = SolutionManager.create(business.getSolverFactory());
-        ScoreExplanation<PairingSolution, HardSoftLongScore> explain = scoreManager.explain(solution);
-        Map<String, ConstraintMatchTotal<HardSoftLongScore>> constraintMatchTotalMap = explain.getConstraintMatchTotalMap();
-        ViewAllConstraint.viewAll(constraintMatchTotalMap, solution);
-        //ViewAllConstraint.pairingScore(explain);
-
-        // Output Excel File
-        System.out.println("save...");
+        // 결과 저장
         business.saveSolution(null);
-        System.out.println("done");
-
         System.exit(0);
     }
 
     public PairingApp(String dataDirPath, String dataDirName, String informationFileName) {
-        super("CrewPairing",
-                "Airline Scheduling Crew Pairing",
-                SOLVER_CONFIG,
-                dataDirPath,
-                dataDirName,
-                informationFileName);
+        super("CrewPairing", "Airline Scheduling", SOLVER_CONFIG, dataDirPath, dataDirName, informationFileName);
     }
 
-    @Override
-    public SolutionFileIO<PairingSolution> createSolutionFileIO() {
-        return new FlightCrewPairingXlsxFileIO();
-    }
+    @Override public SolutionFileIO<PairingSolution> createSolutionFileIO() { return new FlightCrewPairingXlsxFileIO(); }
 }
