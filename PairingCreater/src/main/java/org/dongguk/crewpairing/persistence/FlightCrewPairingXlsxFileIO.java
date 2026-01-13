@@ -227,6 +227,11 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
             while (currentRowIterator.hasNext()) {
                 XSSFRow row = (XSSFRow) currentRowIterator.next();
 
+                if (row == null || row.getCell(0) == null || row.getCell(0).getCellType() == CellType.BLANK) {
+                    log.info("data empty row detect!");
+                    break; 
+            }
+
                 try {
                     DomainFactory.addFlight(Flight.builder()
                             .id(indexCnt++)
@@ -273,24 +278,30 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
             public void write() {
                 String timeStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy_MM_dd_HH_mm_ss"));
                 
-                Scanner scanner = new Scanner(System.in);
-                System.out.print("Enter export type (p for PairingData, u1 for UserData, u2 for UserData2): ");
-                String exportType = scanner.nextLine().trim();
+                // nohup 환경을 위해 자동 저장 모드로 동작
+                System.out.println(">>> Automated Exporting: PairingData & UserData2");
+                exportPairingData(timeStr); // fileNameBase를 인자로 전달
+                exportUserData2(timeStr);   // fileNameBase를 인자로 전달
+        
 
-                switch (exportType) {
-                    case "p":
-                        exportPairingData(timeStr);
-                        break;
-                    case "u1":
-                        exportUserData(timeStr);
-                        break;
-                    case "u2":
-                        exportUserData2(timeStr);
-                        break;
-                    default:
-                        System.out.println("Invalid input. Please enter 'p', 'u1', or 'u2'.");
-                }
-                scanner.close();
+                // Scanner scanner = new Scanner(System.in);
+                // System.out.print("Enter export type (p for PairingData, u1 for UserData, u2 for UserData2): ");
+                // String exportType = scanner.nextLine().trim();
+
+                // switch (exportType) {
+                //     case "p":
+                //         exportPairingData(timeStr);
+                //         break;
+                //     case "u1":
+                //         exportUserData(timeStr);
+                //         break;
+                //     case "u2":
+                //         exportUserData2(timeStr);
+                //         break;
+                //     default:
+                //         System.out.println("Invalid input. Please enter 'p', 'u1', or 'u2'.");
+                // }
+                // scanner.close();
             }
 
             private void exportPairingData(String timeStr) {
@@ -366,7 +377,7 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
                     Cell cell = row.createCell(0);
                     cell.setCellValue("Pairing SET");
                     cell.setCellStyle(headerStyle);
-                    sheet.autoSizeColumn(0);
+                    // sheet.autoSizeColumn(0);
 
                     //가장 늦게 끝나는 페어링을 헤더의 마지막 날짜로 잡기 위함
                     for (Pairing pairing : pairingList) {
@@ -435,7 +446,7 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
                             contentStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
 
                             cell.setCellStyle(contentStyle);
-                            sheet.autoSizeColumn(k);
+                            // sheet.autoSizeColumn(k);
                         }
                     }
 
@@ -472,7 +483,7 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
                     Cell cell = row.createCell(0);
                     cell.setCellValue("Pairing SET");
                     cell.setCellStyle(headerStyle);
-                    sheet.autoSizeColumn(0);
+                    // sheet.autoSizeColumn(0);
 
                     // 타임 테이블 내용 작성
                     XSSFColor[] colors = {
@@ -515,7 +526,7 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
 
                             cell.setCellStyle(contentStyle);
 
-                            sheet.autoSizeColumn(k);
+                            // sheet.autoSizeColumn(k);
                         }
                     }
 
