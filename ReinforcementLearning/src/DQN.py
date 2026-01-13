@@ -197,6 +197,10 @@ def main():
             if memory.size() > 2000:
                 train(q, q_target, memory, optimizer)
 
+            # TODO: 일정 에피소드마다 q_target 업데이트 (여기서는 20 epi로 설정) - epi 단위 확인 필요
+            if n_epi % 20 == 0:
+                q_target.load_state_dict(q.state_dict())
+
             if best_score < score:
                 best_score = score
                 output = output_tmp
@@ -225,10 +229,15 @@ def main():
     env.close()
     
     # 최종 생성된 페어링을 xlsx로 ouput 디렉토리에 저장
-    print_xlsx(output, os.path.join(output_directory, f'output_pairing_{month}_{episodes}_{excutionId}.xlsx'))
     
+    
+    output_xlsx_path = os.path.join(output_directory, f'output_pairing_{month}_{episodes}_{excutionId}.xlsx')
+
+    print_xlsx(output, output_xlsx_path)
+    print(f"Final output saved to: {output_xlsx_path}")
+
     # (선택) wandb에 결과 파일도 올리고 싶으면 주석 해제
-    wandb.save(out_xlsx)
+    wandb.save(output_xlsx_path)
     wandb.save(logs_filename)
 
     wandb.finish()
