@@ -17,44 +17,52 @@ import java.util.*;
 
 @Slf4j
 public class PairingApp extends CommonApp<PairingSolution> {
-    public static final String SOLVER_CONFIG = "solverConfig.xml";
 
     public static void main(String[] args) {
         
-        if (args.length < 7) {
+        if (args.length < 8) {
             throw new IllegalArgumentException(
-                "Usage: java -jar crew-pairing.jar " +
-                "<dataDirPath> <dataDirName> <flightSize> <input.xlsx> " +
-                "<opis|kbra|dqn> [pairing.xlsx] <iteration> <timeLimitMs>"
+                "Usage: java -jar crew-pairing.jar "
+            + "<dataDirPath> <dataDirName> <solverConfig.xml> "
+            + "<flightSize> <input.xlsx> "
+            + "<opis|kbra|dqn> [pairing.xlsx] <iteration> <timeLimitMs>"
+            );
+        }
+
+        String mode = args[5]; // opis | kbra | dqn
+
+        if ("dqn".equals(mode) && args.length < 9) {
+            throw new IllegalArgumentException(
+                "DQN mode requires: [pairing.xlsx] <iteration> <timeLimitMs>"
             );
         }
 
 
         String dataDirPath = args[0];
         String dataDirName = args[1];
-        Integer flightSize = Integer.valueOf(args[2]);
-        String informationXlsxFile = args[3];
+        String solverConfigResource = args[2];
+        Integer flightSize = Integer.valueOf(args[3]);
+        String informationXlsxFile = args[4];
 
-        String mode = args[4];   // opis | kbra | dqn
         String pairingXlsxFile = null;
         int stepLimit;
         long timeLimitMs;
 
         switch (mode) {
             case "opis":
-                stepLimit = Integer.parseInt(args[5]);
-                timeLimitMs = Long.parseLong(args[6]);
+                stepLimit = Integer.parseInt(args[6]);
+                timeLimitMs = Long.parseLong(args[7]);
                 break;
 
             case "kbra":
-                stepLimit = Integer.parseInt(args[5]);
-                timeLimitMs = Long.parseLong(args[6]);
+                stepLimit = Integer.parseInt(args[6]);
+                timeLimitMs = Long.parseLong(args[7]);
                 break;
 
             case "dqn":
-                pairingXlsxFile = args[5];
-                stepLimit = Integer.parseInt(args[6]);
-                timeLimitMs = Long.parseLong(args[7]);
+                pairingXlsxFile = args[6];
+                stepLimit = Integer.parseInt(args[7]);
+                timeLimitMs = Long.parseLong(args[8]);
                 break;
 
             default:
@@ -75,7 +83,7 @@ public class PairingApp extends CommonApp<PairingSolution> {
 
 
         assert flightSize != null;
-        SolutionBusiness<PairingSolution, ?> business = new PairingApp(dataDirPath, dataDirName, informationXlsxFile)
+        SolutionBusiness<PairingSolution, ?> business = new PairingApp(dataDirPath, dataDirName, solverConfigResource, informationXlsxFile)
                 .init(flightSize, stepLimit, timeLimitMs).getSolutionBusiness();
 
         business.setTimeLimitMs(timeLimitMs);
@@ -98,6 +106,7 @@ public class PairingApp extends CommonApp<PairingSolution> {
             List<Flight> flightList = business.getSolution().getFlightList();
 
             long kbraInitStart = System.currentTimeMillis();
+            business.setExternalInitialStartTimeMs(kbraInitStart);
 
             List<Pairing> randomPairings =
                     RandomPairingGenerator.generate(
@@ -106,20 +115,17 @@ public class PairingApp extends CommonApp<PairingSolution> {
                             42L
                     );
 
-            long kbraInitEnd = System.currentTimeMillis();
-            long kbraInitTimeMs = kbraInitEnd - kbraInitStart;
 
             business.getSolution().setPairingList(randomPairings);
 
-            business.setExternalInitialSolutionTimeMs(kbraInitTimeMs);
-            System.out.println(
-                "[KBRA INIT] Random pairing generation time(ms) = "
-                + kbraInitTimeMs
-            );
+            System.out.println("[KBRA] Random initial pairing injected.");
         }
 
 
         if ("dqn".equals(mode)) {
+            long xlsxReadStart = System.currentTimeMillis();
+            business.setExternalInitialStartTimeMs(xlsxReadStart);
+
             FlightCrewPairingXlsxFileIO xlsxFileIO = new FlightCrewPairingXlsxFileIO();
             List<Flight> flightList = business.getSolution().getFlightList();
 
@@ -137,8 +143,6 @@ public class PairingApp extends CommonApp<PairingSolution> {
                 );
 
             business.getSolution().setPairingList(pairingList);
-            // DQN-순수 solve 시작 시점 지정
-            business.markPureSolveStart();
             System.out.println("[DQN] XLSX initial pairing injected.");
         }
 
@@ -165,10 +169,10 @@ public class PairingApp extends CommonApp<PairingSolution> {
         System.exit(0);
     }
 
-    public PairingApp(String dataDirPath, String dataDirName, String informationFileName) {
+    public PairingApp(String dataDirPath, String dataDirName, String solverConfigResource, String informationFileName) {
         super("CrewPairing",
                 "Airline Scheduling Crew Pairing",
-                SOLVER_CONFIG,
+                solverConfigResource,
                 dataDirPath,
                 dataDirName,
                 informationFileName);
