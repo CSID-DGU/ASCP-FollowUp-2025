@@ -46,7 +46,7 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
     }
 
     private static final Comparator<File> FILE_COMPARATOR = new ProblemFileComparator();
-    private static final AtomicLong SOLVER_JOB_ID_COUNTER = new AtomicLong();       // 역할 못 찾음
+
     private static final Logger LOGGER = LoggerFactory.getLogger(SolutionBusiness.class);
 
     private final CommonApp<Solution_> app;
@@ -72,6 +72,12 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
     private File inputDataDir;
     private File outputDataDir;
 
+
+    private long solveStartTime;
+    private long initSolutionTime; // 초기해 생성 완료 시점
+    private long bestScoreTime;    // 베스트 스코어 도출 시점
+    private int bestScoreStep;     // 베스트 스코어 도출 Iteration
+    private int currentStepCount;  // 전체 진행 Iteration 카운트
 
     public SolutionBusiness(CommonApp<Solution_> app, SolverFactory<Solution_> solverFactory) {
         this.app = app;
@@ -149,16 +155,68 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
     }
 
     public Solution_ solve(Solution_ problem) {
-        SolverJob<Solution_, Long> solverJob = solverManager.solveAndListen(SOLVER_JOB_ID_COUNTER.getAndIncrement(),
-                id -> problem, this::setSolution);
+        solveStartTime = System.currentTimeMillis();
+        initSolutionTime = 0;
+        bestScoreTime = 0;
+        bestScoreStep = 0;
+        currentStepCount = 0;
+        
+        // 베스트 스코어 비교를 위한 내부 객체
+        AtomicReference<Score_> lastBestScore = new AtomicReference<>(null);
+
+        System.out.println("[SOLVER START]");
+
+        SolverJob<Solution_, Long> solverJob = solverManager.solveAndListen(
+                1L,
+                id -> problem, 
+                bestSolution -> {
+                    long elapsed = System.currentTimeMillis() - solveStartTime;
+                    Score_ currentScore = solutionManager.update(bestSolution);
+                    
+                    // 1. 초기해 생성 시점 기록 (첫 번째 호출 시)
+                    if (initSolutionTime == 0) {
+                        initSolutionTime = elapsed;
+                    }
+
+                    // 2. 베스트 스코어 갱신 트래킹
+                    if (lastBestScore.get() == null || currentScore.compareTo(lastBestScore.get()) > 0) {
+                        lastBestScore.set(currentScore);
+                        bestScoreTime = elapsed;
+                        bestScoreStep = currentStepCount;
+                    }
+                    
+                    // 진행 로그 출력
+                    System.out.printf("[PROGRESS] %d,%s (Step: %d)%n", elapsed, currentScore, currentStepCount);
+                    
+                    this.setSolution(bestSolution);
+                    currentStepCount++; // Iteration 카운트 증가
+                }
+        );
+
         solverJobRef.set(solverJob);
+
         try {
-            return solverJob.getFinalBestSolution();
-        } catch (InterruptedException e) {
+            Solution_ finalSolution = solverJob.getFinalBestSolution();
+            long totalDuration = System.currentTimeMillis() - solveStartTime;
+            Score_ finalScore = solutionManager.update(finalSolution);
+            System.out.println("\n" + "=".repeat(60));
+            System.out.println("            [ EXPERIMENT RESULT SUMMARY ]");
+            System.out.println("=".repeat(60));
+            System.out.println(" 1. Solver Start Time       : " + new java.util.Date(solveStartTime));
+            System.out.println(" 2. Initial Solution Ready  : " + initSolutionTime + " ms");
+            System.out.println(" 3. Best Score Found Time   : " + bestScoreTime + " ms");
+            System.out.println(" 4. Best Score Found Step   : " + bestScoreStep + " iteration");
+            System.out.println(" 5. Final Solver End Time   : " + totalDuration + " ms");
+            System.out.println(" 6. Final Best Score        : " + finalScore);
+            System.out.println(" 7. Total Steps Processed   : " + currentStepCount + " iterations");
+            System.out.println("=".repeat(60) + "\n");
+            
+            return finalSolution;
+            } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Solver thread was interrupted.", e);
         } catch (ExecutionException e) {
-            throw new IllegalStateException("Solver threw an exception.", e);
+            throw new IllegalStateException("Solver failed.", e);
         } finally {
             solverJobRef.set(null); // Don't keep references to jobs that have finished solving.
         }
