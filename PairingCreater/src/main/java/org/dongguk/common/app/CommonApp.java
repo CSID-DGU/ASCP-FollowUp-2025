@@ -48,23 +48,30 @@ public abstract class CommonApp<Solution_> extends LoggingMain {
         this.informationFileName = informationFileName;
     }
 
-        public CommonApp<Solution_> init(Integer flightSize, int stepLimit) {
-        init(null, true, flightSize, stepLimit);
+    public CommonApp<Solution_> init(
+            Integer flightSize,
+            int stepLimit,
+            long timeLimitMs
+    ) {
+        init(null, true, flightSize, stepLimit, timeLimitMs);
         return this;
     }
+
 
     public void init(Component centerForComponent,
                     boolean exitOnClose,
                     Integer flightSize,
-                    int stepLimit) {
-        solutionBusiness = createSolutionBusiness(flightSize, stepLimit);
+                    int stepLimit,
+                    long timeLimitMs) {
+        solutionBusiness = createSolutionBusiness(flightSize, stepLimit, timeLimitMs);
     }
 
 
-    //해당 부분 수정 
     private SolutionBusiness<Solution_, ?> createSolutionBusiness(
-        Integer flightSize, int stepLimit)
- {
+            Integer flightSize,
+            int stepLimit,
+            long timeLimitMs
+    ){
         // Scanner scanner = new Scanner(System.in);
         // System.out.print("Enter the iteration limit: ");
         // int stepLimit = scanner.nextInt();
@@ -77,7 +84,13 @@ public abstract class CommonApp<Solution_> extends LoggingMain {
             for (PhaseConfig phaseConfig : phaseConfigList) {
                 if (phaseConfig instanceof LocalSearchPhaseConfig) {
                     LocalSearchPhaseConfig lsConfig = (LocalSearchPhaseConfig) phaseConfig;
-                    lsConfig.setTerminationConfig(new TerminationConfig().withStepCountLimit(stepLimit));
+                    
+                    TerminationConfig terminationConfig = new TerminationConfig()
+                            .withStepCountLimit(stepLimit)
+                            .withMillisecondsSpentLimit(timeLimitMs);
+
+                    lsConfig.setTerminationConfig(terminationConfig);
+
                 }
             }
         }
