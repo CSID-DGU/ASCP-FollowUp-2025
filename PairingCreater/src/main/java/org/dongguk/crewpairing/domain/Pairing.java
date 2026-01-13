@@ -14,8 +14,6 @@ import java.util.Map;
 
 @Getter
 @Setter
-@AllArgsConstructor
-@RequiredArgsConstructor
 @PlanningEntity
 public class Pairing extends AbstractPersistable {
     //변수로서 작동 된다. Pair 는 Flight 들의 연속이므로 ListVariable 로 작동된다.
@@ -35,6 +33,14 @@ public class Pairing extends AbstractPersistable {
         Pairing.restTime = restTime;
         Pairing.LayoverTime = LayoverTime + 2*60 ;      // brief와 debrief를 고려하기 위한 layover time 2시간 증가
         Pairing.QuickTurnaroundTime = QuickTurnaroundTime;
+    }
+
+    public Pairing() {
+        super();
+    }
+
+    public Pairing(long id) {
+        super(id);
     }
 
     @Builder
