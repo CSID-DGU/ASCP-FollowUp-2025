@@ -59,7 +59,7 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
         private final Map<String, Airport> airportMap = new HashMap<>();
 
         public FlightCrewPairingXlsxReader(XSSFWorkbook workbook) {
-            super(workbook, PairingApp.SOLVER_CONFIG);
+            super(workbook, "runtime");
         }
 
         @Override
@@ -266,31 +266,38 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
         public static class FlightCrewPairingXlsxWriter extends AbstractXlsxWriter<PairingSolution, HardSoftScore> {
 
             public FlightCrewPairingXlsxWriter(PairingSolution pairingSolution) {
-                super(pairingSolution, PairingApp.SOLVER_CONFIG);
+                super(pairingSolution, "runtime");
             }
 
+            // @Override
+            // public void write() {
+            //     String timeStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy_MM_dd_HH_mm_ss"));
+                
+            //     Scanner scanner = new Scanner(System.in);
+            //     System.out.print("Enter export type (p for PairingData, u1 for UserData, u2 for UserData2): ");
+            //     String exportType = scanner.nextLine().trim();
+
+            //     switch (exportType) {
+            //         case "p":
+            //             exportPairingData(timeStr);
+            //             break;
+            //         case "u1":
+            //             exportUserData(timeStr);
+            //             break;
+            //         case "u2":
+            //             exportUserData2(timeStr);
+            //             break;
+            //         default:
+            //             System.out.println("Invalid input. Please enter 'p', 'u1', or 'u2'.");
+            //     }
+            //     scanner.close();
+            // }
             @Override
             public void write() {
-                String timeStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy_MM_dd_HH_mm_ss"));
-                
-                Scanner scanner = new Scanner(System.in);
-                System.out.print("Enter export type (p for PairingData, u1 for UserData, u2 for UserData2): ");
-                String exportType = scanner.nextLine().trim();
+                String timeStr = LocalDateTime.now()
+                        .format(DateTimeFormatter.ofPattern("yyyy_MM_dd_HH_mm_ss"));
 
-                switch (exportType) {
-                    case "p":
-                        exportPairingData(timeStr);
-                        break;
-                    case "u1":
-                        exportUserData(timeStr);
-                        break;
-                    case "u2":
-                        exportUserData2(timeStr);
-                        break;
-                    default:
-                        System.out.println("Invalid input. Please enter 'p', 'u1', or 'u2'.");
-                }
-                scanner.close();
+                exportPairingData(timeStr);
             }
 
             public void exportPairingData(String timeStr) {
