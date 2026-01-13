@@ -84,9 +84,14 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
     // OPIS mode flag
     private boolean opisMode = false;
 
-    // initial solution creation time (ms from solve start)
+    // 첫 best solution 기준 초기해 종료 시점 (ms)
     private volatile Long initialSolutionTimeMs = null;
-    private Long externalInitialSolutionTimeMs = null;
+
+    // 외부 초기해 생성 "시작 시점" (absolute time)
+    private Long externalInitialStartTimeMs = null;
+
+    // // 외부 초기해 생성 "소요 시간" (KBRA)
+    // private Long externalInitialSolutionTimeMs = null;
 
     // solver start timestamp
     private long solveStartTime;
@@ -135,12 +140,12 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
         this.opisMode = opisMode;
     }
 
-    public void setExternalInitialSolutionTimeMs(Long t) {
-        this.externalInitialSolutionTimeMs = t;
-    }
+    // public void setExternalInitialSolutionTimeMs(Long t) {
+    //     this.externalInitialSolutionTimeMs = t;
+    // }
 
-    public void markPureSolveStart() {
-        this.pureSolveStartTimeMs = System.currentTimeMillis();
+    public void setExternalInitialStartTimeMs(Long t) {
+        this.externalInitialStartTimeMs = t;
     }
 
     public void updateDataDirs() {
@@ -218,6 +223,12 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
         // 시작 시간 기록
         startTime = System.currentTimeMillis();
         solveStartTime = startTime;
+        if (!opisMode && externalInitialStartTimeMs == null) {
+            throw new IllegalStateException(
+                "externalInitialStartTimeMs is null for non-OPIS mode"
+            );
+        }
+
         initialSolutionTimeMs = null;
         solveStartTime = startTime;
 
@@ -244,10 +255,21 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
                     if (initialSolutionTimeMs == null) {
                         synchronized (this) {
                             if (initialSolutionTimeMs == null) {
-                                initialSolutionTimeMs = now;
 
-                                // OPIS: 순수 solve 시작 시점 = 초기해 생성 직후
-                                pureSolveStartTimeMs = solveStartTime + initialSolutionTimeMs;
+                                long bestSolAbsTime = System.currentTimeMillis();
+
+                                if (opisMode) {
+                                    // OPIS: solve() 시작 → first best solution
+                                    initialSolutionTimeMs =
+                                            bestSolAbsTime - solveStartTime;
+                                } else {
+                                    // KBRA / DQN: 외부 초기해 시작 → first best solution
+                                    initialSolutionTimeMs =
+                                            bestSolAbsTime - externalInitialStartTimeMs;
+                                }
+
+                                // 공통: 순수 solver는 first best solution 직후 시작
+                                pureSolveStartTimeMs = bestSolAbsTime;
 
                                 System.out.println(
                                     "[INIT SOLUTION READY] time(ms) = " + initialSolutionTimeMs
@@ -255,6 +277,7 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
                             }
                         }
                     }
+
 
                     // 2. best score 도달 시점 기록
                     Score_ newScore = solutionManager.update(bestSolution);
@@ -301,16 +324,25 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
                 );
             }
 
-            long totalTimeMs = System.currentTimeMillis() - solveStartTime;
+            long solverEndTime = System.currentTimeMillis();
+
+            long totalTimeMs;
+            if (opisMode) {
+                // OPIS: solve() 시작 기준
+                totalTimeMs = solverEndTime - solveStartTime;
+            } else {
+                // KBRA / DQN: 외부 초기해 시작 기준
+                totalTimeMs = solverEndTime - externalInitialStartTimeMs;
+            }
+
 
             Long pureSolveTimeMs = null;
             if (pureSolveStartTimeMs != null) {
-                pureSolveTimeMs = System.currentTimeMillis() - pureSolveStartTimeMs;
+                pureSolveTimeMs = solverEndTime - pureSolveStartTimeMs;
             }
 
             System.out.println("================================");
-            System.out.println("Initial solution time(ms) = " +
-                    (opisMode ? initialSolutionTimeMs : externalInitialSolutionTimeMs));
+            System.out.println("Initial solution time(ms) = " + initialSolutionTimeMs);
             System.out.println("Pure solve time(ms) = " + pureSolveTimeMs);
             System.out.println("Total wall time(ms) = " + totalTimeMs);
             System.out.println("Best score first reached at(ms) = " + bestScoreTimeMs);
@@ -319,7 +351,7 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
 
             writeLog(logFilePath,
                 "SUMMARY"
-                + ", initTimeMs=" + (opisMode ? initialSolutionTimeMs : externalInitialSolutionTimeMs)
+                + ", initTimeMs=" + initialSolutionTimeMs
                 + ", pureSolveTimeMs=" + pureSolveTimeMs
                 + ", totalTimeMs=" + totalTimeMs
                 + ", bestScoreTimeMs=" + bestScoreTimeMs
