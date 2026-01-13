@@ -82,8 +82,9 @@ start_cutoff = get_valid_datetime_input("✒ 시작 일시: ")
 end_cutoff = get_valid_datetime_input("✒ 종료 일시: ")
 
 dateFdata = converteddata.loc[(converteddata['DEP_TIME'] > start_cutoff) & (converteddata['ARR_TIME'] < end_cutoff)]
-
-# 기종 입력
+# =========================
+# 기종 입력 (all 옵션 추가)
+# =========================
 craftFdata = dateFdata.copy()
 craftlist = list(craftFdata['AIRCRAFT_MODEL'].value_counts().index)
 craftdict = {}
@@ -94,22 +95,36 @@ print('\n\n')
 print("#############    원하는 비행기의 기종을 입력해주세요   #############")
 print("🛫 기종 목록 🛫")
 print(craftdict)
-craftnum = [int(x) for x in input("\n✒ 항공사의 번호를 입력해주세요 ex) 1 4 5 : ").split()]
-selectedcraft = [craftdict[key] for key in craftnum]
+
+craft_in = input("\n✒ 비행기의 기종 번호를 입력해주세요 ex) 1 4 5 | 전체 선택: all : ").strip().lower()
+if craft_in == "all":
+  selectedcraft = list(craftdict.values())
+else:
+  craftnum = [int(x) for x in craft_in.split()]
+  selectedcraft = [craftdict[key] for key in craftnum]
 
 craftFdata = craftFdata[craftFdata['AIRCRAFT_MODEL'].isin(selectedcraft)]
 
-# 공항 입력
+# =========================
+# 공항 입력 (top_n all 옵션 + 공항번호 all 옵션 추가)
+# =========================
 portFdata = craftFdata.copy()
 print('\n\n')
 print("#############    원하는 공항의 종류을 입력해주세요   #############")
-top_n = int(input("✒ 상위 몇개의 공항을 확인하시겠습니까? : "))
+
+top_in = input("✒ 상위 몇개의 공항을 확인하시겠습니까? (숫자) | 전체 보기: all : ").strip().lower()
+if top_in == "all":
+  top_n = 10**9  # 사실상 전체
+else:
+  top_n = int(top_in)
+
 print()
 print("🛫 출발 공항 개수 🛫")
 originPort = pd.DataFrame(portFdata['ORIGIN'].value_counts()).head(top_n)
 originPort.reset_index(inplace=True)
 originPort.rename(columns={'index':'PORT','ORIGIN':'#'}, inplace=True)
 print(originPort)
+
 print()
 print("🛫 도착 공항 개수 🛫")
 destPort = pd.DataFrame(portFdata['DEST'].value_counts()).head(top_n)
@@ -120,14 +135,18 @@ print(destPort)
 # 공항을 숫자로 제시하기
 portset = set(np.concatenate((originPort['#'].values,destPort['#'].values)))
 portdict = {}
-
 for index, element in enumerate(sorted(portset), start=1):
   portdict[index] = element
 
 print("🛫 공항 목록 🛫")
 print(portdict)
-portnum = [int(x) for x in input("\n✒ 공항의 번호를 입력해주세요 ex) 1 4 5 : ").split()]
-selectedport = [portdict[key] for key in portnum]
+
+port_in = input("\n✒ 공항의 번호를 입력해주세요 ex) 1 4 5 | 전체 선택: all : ").strip().lower()
+if port_in == "all":
+  selectedport = list(portdict.values())
+else:
+  portnum = [int(x) for x in port_in.split()]
+  selectedport = [portdict[key] for key in portnum]
 
 # ORIGIN 열의 값이 selectedport 리스트에 없는 행 삭제
 portFdata = portFdata[portFdata['ORIGIN'].isin(selectedport)]
