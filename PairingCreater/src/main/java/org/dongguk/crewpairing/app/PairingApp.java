@@ -21,13 +21,14 @@ public class PairingApp extends CommonApp<PairingSolution> {
 
     public static void main(String[] args) {
         
-        if (args.length < 6) {
+        if (args.length < 7) {
             throw new IllegalArgumentException(
                 "Usage: java -jar crew-pairing.jar " +
                 "<dataDirPath> <dataDirName> <flightSize> <input.xlsx> " +
-                "<opis|kbra|dqn> [pairing.xlsx] <iteration>"
+                "<opis|kbra|dqn> [pairing.xlsx] <iteration> <timeLimitMs>"
             );
         }
+
 
         String dataDirPath = args[0];
         String dataDirName = args[1];
@@ -37,19 +38,23 @@ public class PairingApp extends CommonApp<PairingSolution> {
         String mode = args[4];   // opis | kbra | dqn
         String pairingXlsxFile = null;
         int stepLimit;
+        long timeLimitMs;
 
         switch (mode) {
             case "opis":
                 stepLimit = Integer.parseInt(args[5]);
+                timeLimitMs = Long.parseLong(args[6]);
                 break;
 
             case "kbra":
                 stepLimit = Integer.parseInt(args[5]);
+                timeLimitMs = Long.parseLong(args[6]);
                 break;
 
             case "dqn":
                 pairingXlsxFile = args[5];
                 stepLimit = Integer.parseInt(args[6]);
+                timeLimitMs = Long.parseLong(args[7]);
                 break;
 
             default:
@@ -61,6 +66,8 @@ public class PairingApp extends CommonApp<PairingSolution> {
         System.out.println("================================");
         System.out.println("Mode       = " + mode);
         System.out.println("Iteration  = " + stepLimit);
+        System.out.println("Time limit = " + timeLimitMs + " ms");
+
         if (pairingXlsxFile != null) {
             System.out.println("Init file  = " + pairingXlsxFile);
         }
@@ -69,7 +76,10 @@ public class PairingApp extends CommonApp<PairingSolution> {
 
         assert flightSize != null;
         SolutionBusiness<PairingSolution, ?> business = new PairingApp(dataDirPath, dataDirName, informationXlsxFile)
-                .init(flightSize, stepLimit).getSolutionBusiness();
+                .init(flightSize, stepLimit, timeLimitMs).getSolutionBusiness();
+
+        business.setTimeLimitMs(timeLimitMs);
+        business.setOpisMode("opis".equals(mode));
 
         // Input Information Xlsx File
         business.openSolution(
@@ -87,6 +97,8 @@ public class PairingApp extends CommonApp<PairingSolution> {
         if ("kbra".equals(mode)) {
             List<Flight> flightList = business.getSolution().getFlightList();
 
+            long kbraInitStart = System.currentTimeMillis();
+
             List<Pairing> randomPairings =
                     RandomPairingGenerator.generate(
                             flightList,
@@ -94,9 +106,18 @@ public class PairingApp extends CommonApp<PairingSolution> {
                             42L
                     );
 
+            long kbraInitEnd = System.currentTimeMillis();
+            long kbraInitTimeMs = kbraInitEnd - kbraInitStart;
+
             business.getSolution().setPairingList(randomPairings);
-            System.out.println("[KBRA] Random initial pairing injected.");
+
+            business.setExternalInitialSolutionTimeMs(kbraInitTimeMs);
+            System.out.println(
+                "[KBRA INIT] Random pairing generation time(ms) = "
+                + kbraInitTimeMs
+            );
         }
+
 
         if ("dqn".equals(mode)) {
             FlightCrewPairingXlsxFileIO xlsxFileIO = new FlightCrewPairingXlsxFileIO();
@@ -116,24 +137,16 @@ public class PairingApp extends CommonApp<PairingSolution> {
                 );
 
             business.getSolution().setPairingList(pairingList);
+            // DQN-순수 solve 시작 시점 지정
+            business.markPureSolveStart();
             System.out.println("[DQN] XLSX initial pairing injected.");
         }
 
-
-
-        //[추가] 시작 시간 기록 
-        long startTime = System.currentTimeMillis();
-
-        // Solve By SolverJob
+        // solver 실행
         business.solve(business.getSolution());
-
-        //[추가] 종료 시간 기록 및 출력
-        long endTime = System.currentTimeMillis();
-        long totalTime = endTime - startTime;
 
         // Solution 출력
         PairingSolution solution = business.getSolution();
-        System.out.println(solution);
 
         solution.calculateMandays();
 
@@ -148,14 +161,6 @@ public class PairingApp extends CommonApp<PairingSolution> {
         System.out.println("save...");
         business.saveSolution(null);
         System.out.println("done");
-
-        //[추가] 결과 출력
-        System.out.println("\n" + "=".repeat(40));
-        System.out.println("Performance result");
-        System.out.println("total solve time (): " + totalTime + " ms");
-        System.out.println("(* Note: Divide this by the iteration limit ");
-        System.out.println("  to get the average time per iteration)");
-        System.out.println("=".repeat(40));
 
         System.exit(0);
     }
