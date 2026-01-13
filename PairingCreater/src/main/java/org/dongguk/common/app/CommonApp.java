@@ -6,16 +6,17 @@ import org.dongguk.common.business.SolutionBusiness;
 import org.optaplanner.core.api.solver.SolverFactory;
 import org.optaplanner.core.config.solver.SolverConfig;
 import org.optaplanner.core.config.solver.termination.TerminationConfig;
+import org.optaplanner.core.config.localsearch.LocalSearchPhaseConfig; // 추가
+import org.optaplanner.core.config.phase.PhaseConfig; // 추가
 import org.optaplanner.persistence.common.api.domain.solution.SolutionFileIO;
 
 import java.awt.*;
 import java.io.File;
-import java.util.Scanner;
+import java.util.List;
 
 @Getter
 @Setter
 public abstract class CommonApp<Solution_> extends LoggingMain {
-    // Data Directory 경로
     public static final String DATA_DIR_SYSTEM_PROPERTY = "org.dongguk.dataDir";
 
     protected final String name;
@@ -28,19 +29,14 @@ public abstract class CommonApp<Solution_> extends LoggingMain {
     protected SolutionBusiness<Solution_, ?> solutionBusiness;
     protected SolverConfig solverConfig;
 
-    // 우리가 사용할 Data Directory의 하위 경로 지정
     public File determineDataDir() {
-        // 우리가 원하는 Data Directory 사용
         File dataDir = new File(dataDirPath, dataDirName);
         if (!dataDir.exists()) {
             throw new IllegalStateException(String.format("해당 Path [%s]에 Data Directory는 존재하지 않습니다", dataDir.getAbsolutePath()));
         }
-
         return dataDir;
     }
 
-
-    // 생성자
     protected CommonApp(String name, String description, String solverConfigResource,
                         String dataDirPath, String dataDirName, String informationFileName) {
         this.name = name;
@@ -51,32 +47,39 @@ public abstract class CommonApp<Solution_> extends LoggingMain {
         this.informationFileName = informationFileName;
     }
 
-    // 초기화 함수
-    public CommonApp<Solution_> init(Integer flightSize) {
-        init(null, true, flightSize);
+    public CommonApp<Solution_> init(Integer flightSize, int stepLimit, long timeLimitMs) {
+        init(null, true, flightSize, stepLimit, timeLimitMs);
         return this;
     }
 
-    public void init(Component centerForComponent, boolean exitOnClose, Integer flightSize) {
-        solutionBusiness = createSolutionBusiness(flightSize);
+    public void init(Component centerForComponent, boolean exitOnClose, Integer flightSize, int stepLimit, long timeLimitMs) {
+        solutionBusiness = createSolutionBusiness(flightSize, stepLimit, timeLimitMs);
     }
 
-    private SolutionBusiness<Solution_, ?> createSolutionBusiness(Integer flightSize) {
-        // 터미널에서 사용자 입력을 받아서 초 제한 설정
-        Scanner scanner = new Scanner(System.in);
-        System.out.print("Enter the seconds spent limit in seconds: ");
-        long secondsSpentLimit = scanner.nextLong();
+    private SolutionBusiness<Solution_, ?> createSolutionBusiness(Integer flightSize, int stepLimit, long timeLimitMs) {
+        // Scanner scanner = new Scanner(System.in);
+        // System.out.print("Enter the iteration limit: ");
+        // int stepLimit = scanner.nextInt();
 
-        // SolverConfig.xml을 읽어서 SolverConfig 객체를 생성 및 종료 조건 설정
         SolverConfig solverConfig = SolverConfig.createFromXmlResource(solverConfigResource);
         solverConfig.withMoveThreadCount("1");
-        solverConfig.withTerminationConfig(
-                new TerminationConfig()
-                        .withSecondsSpentLimit(secondsSpentLimit*1L));
-                        //.withUnimprovedSecondsSpentLimit((long) (8.0 * Math.max(1.0, Math.log10(flightSize))))
-                        //.withSecondsSpentLimit((long) (45.0 * Math.max(1.0, Math.log10(flightSize)))));
 
-        // SolutionBusiness 객체 생성
+        List<PhaseConfig> phaseConfigList = solverConfig.getPhaseConfigList();
+        if (phaseConfigList != null) {
+            for (PhaseConfig phaseConfig : phaseConfigList) {
+                if (phaseConfig instanceof LocalSearchPhaseConfig) {
+                LocalSearchPhaseConfig lsConfig = (LocalSearchPhaseConfig) phaseConfig;
+
+                // 설정 객체를 생성함과 동시에 lsConfig에 꽂아넣어야 합니다.
+                lsConfig.setTerminationConfig(new TerminationConfig()
+                        .withStepCountLimit(stepLimit)
+                        .withMillisecondsSpentLimit(timeLimitMs));
+                
+                System.out.println("[DEBUG] Termination set: " + stepLimit + " steps / " + timeLimitMs + " ms");
+                }
+            }
+        }
+
         SolutionBusiness<Solution_, ?> solutionBusiness = new SolutionBusiness<>(this,
                 SolverFactory.create(solverConfig));
         solutionBusiness.setDataDir(determineDataDir());
@@ -85,11 +88,5 @@ public abstract class CommonApp<Solution_> extends LoggingMain {
         return solutionBusiness;
     }
 
-    // Solution File IO
     public abstract SolutionFileIO<Solution_> createSolutionFileIO();
-
-    // 사용 유무 모르겠음
-    // public interface ExtraAction<Solution_> extends BiConsumer<SolutionBusiness<Solution_, ?>, SolutionPanel<Solution_>> {
-    //     String getName();
-    // }
 }
