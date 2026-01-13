@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -75,6 +76,29 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
      * 여러 개의 최적화 문제를 푸는 것이 아닌 하나의 최적화 문제만 풀 것이므로 동시성 문제를 생각할 필요가 없음
      * 하지만 사용해본다!
      */
+    // ================= Time-based termination support =================
+
+    // solver time limit (ms)
+    private Long timeLimitMs = null;
+
+    // OPIS mode flag
+    private boolean opisMode = false;
+
+    // initial solution creation time (ms from solve start)
+    private volatile Long initialSolutionTimeMs = null;
+    private Long externalInitialSolutionTimeMs = null;
+
+    // solver start timestamp
+    private long solveStartTime;
+    // 순수 solver 시작 시점 (wall-clock 기준)
+    private Long pureSolveStartTimeMs = null;
+
+
+    // best score tracking
+    private volatile Score_ bestScoreSoFar = null;
+    private volatile Long bestScoreTimeMs = null;
+
+
     private final AtomicReference<SolverJob<Solution_, Long>> solverJobRef = new AtomicReference<>();
     private final AtomicReference<Solution_> workingSolutionRef = new AtomicReference<>();
 
@@ -90,9 +114,33 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
 
     public SolutionBusiness(CommonApp<Solution_> app, SolverFactory<Solution_> solverFactory) {
         this.app = app;
-        this.solverFactory = (DefaultSolverFactory<Solution_>) solverFactory;
-        this.solverManager = SolverManager.create(solverFactory);
-        this.solutionManager = SolutionManager.create(solverFactory);
+        DefaultSolverFactory<Solution_> df =
+                (DefaultSolverFactory<Solution_>) solverFactory;
+
+        // OPIS 초기해 시간 측정은 solve()에서 처리
+
+        this.solverFactory = df;
+        this.solverManager = SolverManager.create(df);
+        this.solutionManager = SolutionManager.create(df);
+
+    }
+
+    public void setTimeLimitMs(long timeLimitMs) {
+        if (timeLimitMs > 0) {
+            this.timeLimitMs = timeLimitMs;
+        }
+    }
+
+    public void setOpisMode(boolean opisMode) {
+        this.opisMode = opisMode;
+    }
+
+    public void setExternalInitialSolutionTimeMs(Long t) {
+        this.externalInitialSolutionTimeMs = t;
+    }
+
+    public void markPureSolveStart() {
+        this.pureSolveStartTimeMs = System.currentTimeMillis();
     }
 
     public void updateDataDirs() {
@@ -169,6 +217,13 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
     public Solution_ solve(Solution_ problem) {
         // 시작 시간 기록
         startTime = System.currentTimeMillis();
+        solveStartTime = startTime;
+        initialSolutionTimeMs = null;
+        solveStartTime = startTime;
+
+        // KBRA/DQN 기본값
+        // OPIS의 경우, 최초 feasible solution 생성 시점을 순수 solver 탐색 시작 시점으로 재설정
+        pureSolveStartTimeMs = solveStartTime;
 
         // 현재 날짜와 시간을 기반으로 파일 이름 생성
         String timeStamp = new SimpleDateFormat("yyyy-MM-dd_HH:mm").format(new Date());
@@ -177,9 +232,51 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
         // 스케줄러 시작
         startLogging(logFilePath);
 
-        SolverJob<Solution_, Long> solverJob = solverManager.solveAndListen(SOLVER_JOB_ID_COUNTER.getAndIncrement(),
-                id -> problem, this::setSolution);
-        solverJobRef.set(solverJob);
+        SolverJob<Solution_, Long> solverJob =
+            solverManager.solveAndListen(
+                SOLVER_JOB_ID_COUNTER.getAndIncrement(),
+                id -> problem,
+                bestSolution -> {
+
+                    long now = System.currentTimeMillis() - solveStartTime;
+
+                    // 1. 초기해 생성 시점 기록
+                    if (initialSolutionTimeMs == null) {
+                        synchronized (this) {
+                            if (initialSolutionTimeMs == null) {
+                                initialSolutionTimeMs = now;
+
+                                // OPIS: 순수 solve 시작 시점 = 초기해 생성 직후
+                                pureSolveStartTimeMs = solveStartTime + initialSolutionTimeMs;
+
+                                System.out.println(
+                                    "[INIT SOLUTION READY] time(ms) = " + initialSolutionTimeMs
+                                );
+                            }
+                        }
+                    }
+
+                    // 2. best score 도달 시점 기록
+                    Score_ newScore = solutionManager.update(bestSolution);
+
+                    if (bestScoreSoFar == null || newScore.compareTo(bestScoreSoFar) > 0) {
+                        bestScoreSoFar = newScore;
+                        bestScoreTimeMs = now;
+
+                        System.out.println(
+                            "[BEST SCORE UPDATED] time(ms) = " + bestScoreTimeMs
+                            + ", score = " + bestScoreSoFar
+                        );
+                    }
+
+                    // 3. 최신 best solution 유지
+                    setSolution(bestSolution);
+                }
+            );
+
+
+        solverJobRef.set(solverJob);      
+
         try {
             return solverJob.getFinalBestSolution();
         } catch (InterruptedException e) {
@@ -188,11 +285,47 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
         } catch (ExecutionException e) {
             throw new IllegalStateException("Solver threw an exception.", e);
         } finally {
-            solverJobRef.set(null); // Don't keep references to jobs that have finished solving.
-            // 스케줄러 종료
+            solverJobRef.set(null);
             if (scheduler != null) {
                 scheduler.shutdown();
             }
+            System.out.println("[SOLVER END]");
+
+            //DQN 초기해 생성은 solver 외부에서 수행되므로 제외
+            System.out.println("Initial solution time(ms) = " + initialSolutionTimeMs);
+
+            if (opisMode && initialSolutionTimeMs != null) {
+                System.out.println(
+                    "OPIS pure solver time(ms) = "
+                    + ((System.currentTimeMillis() - solveStartTime) - initialSolutionTimeMs)
+                );
+            }
+
+            long totalTimeMs = System.currentTimeMillis() - solveStartTime;
+
+            Long pureSolveTimeMs = null;
+            if (pureSolveStartTimeMs != null) {
+                pureSolveTimeMs = System.currentTimeMillis() - pureSolveStartTimeMs;
+            }
+
+            System.out.println("================================");
+            System.out.println("Initial solution time(ms) = " +
+                    (opisMode ? initialSolutionTimeMs : externalInitialSolutionTimeMs));
+            System.out.println("Pure solve time(ms) = " + pureSolveTimeMs);
+            System.out.println("Total wall time(ms) = " + totalTimeMs);
+            System.out.println("Best score first reached at(ms) = " + bestScoreTimeMs);
+            System.out.println("Best score = " + bestScoreSoFar);
+            System.out.println("================================");
+
+            writeLog(logFilePath,
+                "SUMMARY"
+                + ", initTimeMs=" + (opisMode ? initialSolutionTimeMs : externalInitialSolutionTimeMs)
+                + ", pureSolveTimeMs=" + pureSolveTimeMs
+                + ", totalTimeMs=" + totalTimeMs
+                + ", bestScoreTimeMs=" + bestScoreTimeMs
+                + ", bestScore=" + bestScoreSoFar
+            );
+
         }
     }
 
