@@ -1,3 +1,4 @@
+import sys
 import os
 import torch
 import collections
@@ -14,6 +15,10 @@ import random
 import openpyxl
 from datetime import datetime
 import csv
+
+import wandb
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Hyperparameters
 learning_rate = 0.005
@@ -42,9 +47,13 @@ class ReplayBuffer():
             s_prime_lst.append(s_prime)
             done_mask_lst.append([done_mask])
 
-        return torch.tensor(s_lst, dtype=torch.float), torch.tensor(a_lst), \
-               torch.tensor(r_lst), torch.tensor(s_prime_lst, dtype=torch.float), \
-               torch.tensor(done_mask_lst)
+        return (
+            torch.tensor(s_lst, dtype=torch.float, device=device),
+            torch.tensor(a_lst, device=device),
+            torch.tensor(r_lst, device=device),
+            torch.tensor(s_prime_lst, dtype=torch.float, device=device),
+            torch.tensor(done_mask_lst, device=device)
+        )
     
     def size(self):
         return len(self.buffer)
@@ -57,7 +66,10 @@ class Qnet(nn.Module):
         self.fc3 = nn.Linear(128, 2)
 
     def forward(self, x):
-        x = torch.tensor(x, dtype=torch.float32)
+        if not torch.is_tensor(x):
+            x = torch.tensor(x, dtype=torch.float32, device=device)
+        else:
+            x = x.to(device)
 
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
@@ -86,10 +98,13 @@ def train(q, q_target, memory, optimizer):
         optimizer.step()
 
 def main():
-    # 사용자로부터 실행할 데이터의 년월일, 에피소드 수, 실행 ID 입력 받기
-    month = input("Enter the month of the input file (e.g., 201406): ")
-    episodes = int(input("Enter the number of episodes to run: "))
-    excutionId = input("Enter the excution ID (eg., 20240704-1): ")
+    if len(sys.argv) != 4:
+        print("Usage: python DQN.py <YYYYMM> <episodes> <execution_id>")
+        sys.exit(1)
+
+    month = sys.argv[1]
+    episodes = int(sys.argv[2])
+    excutionId = sys.argv[3]
 
     current_directory = os.path.dirname(__file__)
     
@@ -104,6 +119,22 @@ def main():
         os.makedirs(logs_directory)
     if not os.path.exists(models_directory):
         os.makedirs(models_directory)
+    
+    wandb.init(
+        project="ASCP-DQN-delta",
+        name=f"delta_{month}_{episodes}_{excutionId}",
+        config={
+            "algo": "delta_dqn",
+            "month": month,
+            "episodes": episodes,
+            "execution_id": excutionId,
+            "learning_rate": learning_rate,
+            "gamma": gamma,
+            "buffer_limit": buffer_limit,
+            "batch_size": batch_size,
+            "device": str(device),
+        }
+    )
 
     # 데이터 입력 받기
     path = os.path.abspath(os.path.join(current_directory, '../input'))
@@ -118,15 +149,15 @@ def main():
     N_flight = len(flight_list)
     print("Number of Flights :", N_flight)
     env = CrewPairingEnv(V_f_list, flight_list)
-    q = Qnet(NN_size)
+    q = Qnet(NN_size).to(device)
 
-    q_target = Qnet(NN_size)
+    q_target = Qnet(NN_size).to(device)
     q_target.load_state_dict(q.state_dict())
     memory = ReplayBuffer()
 
     optimizer = optim.Adam(q.parameters(), lr=learning_rate)
 
-    score = -INF
+    score = 0
     best_score = -INF
     output = [[] for i in range(N_flight)]
 
@@ -139,6 +170,10 @@ def main():
         time = datetime.now()
     
         for n_epi in range(episodes):
+
+            elapsed = datetime.now() - time
+            model_saved = 0
+        
             print(f"Episode {n_epi}, Time Elapsed: {datetime.now() - time}")
             epsilon = max(0.01, 0.08 - 0.01 * (n_epi / 200))  # Linear annealing from 8% to 1%
             s, _ = env.reset()  # V_p departure airport, V_f arrival airport
@@ -146,11 +181,15 @@ def main():
             output_tmp = []
             
             while not done:
-                a = q.sample_action(torch.from_numpy(np.array(s)).float(), epsilon)
+                a = q.sample_action(
+                    torch.from_numpy(np.array(s)).float().to(device),
+                    epsilon
+                )
+
                 s_prime, r, done, truncated, info, output_tmp = env.step(action=a)
 
                 done_mask = 0.0 if done else 1.0
-                memory.put((s, a, r / 100.0, s_prime, done_mask))
+                memory.put((s, a, r/100.0, s_prime, done_mask))
 
                 s = s_prime  # flight changed by action
                 score += r
@@ -165,10 +204,22 @@ def main():
                 # Best Model이 갱신될 때 마다 models 디렉토리에 저장
                 torch.save(q.state_dict(), os.path.join(models_directory, f'dqn_model_{month}_{episodes}_{excutionId}.pth'))
                 print('Model Saved')
+                model_saved = 1
+
                 
             csvwriter.writerow([n_epi, f"{score:.2f}", f"{best_score:.2f}", f"{datetime.now() - time}"])
             print(f"Current Score: {score:.2f}, Best Score: {best_score:.2f}")
-                
+
+            wandb.log({
+                "episode": n_epi,
+                "reward": float(score),
+                "best_score": float(best_score),
+                "epsilon": float(epsilon),
+                "elapsed_seconds": elapsed.total_seconds(),
+                "replay_size": memory.size(),
+                "model_saved": model_saved,
+            }, step=n_epi)
+
             score = 0
 
     env.close()
@@ -176,5 +227,10 @@ def main():
     # 최종 생성된 페어링을 xlsx로 ouput 디렉토리에 저장
     print_xlsx(output, os.path.join(output_directory, f'output_pairing_{month}_{episodes}_{excutionId}.xlsx'))
     
+    # (선택) wandb에 결과 파일도 올리고 싶으면 주석 해제
+    wandb.save(out_xlsx)
+    wandb.save(logs_filename)
+
+    wandb.finish()
 if __name__ == '__main__':
     main()
