@@ -72,9 +72,9 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
     private File inputDataDir;
     private File outputDataDir;
 
-
-    private long solveStartTime;
-    private long initSolutionTime; // 초기해 생성 완료 시점
+    private long methodStartTime;  // 초기해 생성 시작 시점
+    private long solveStartTime;   // SolverJob이 시작된 시점
+    private long initSolutionTime; // 초기해 생성 종료 시점 (첫 Best Score 계산 시점)
     private long bestScoreTime;    // 베스트 스코어 도출 시점
     private int bestScoreStep;     // 베스트 스코어 도출 Iteration
     private int currentStepCount;  // 전체 진행 Iteration 카운트
@@ -84,6 +84,11 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
         this.solverFactory = (DefaultSolverFactory<Solution_>) solverFactory;
         this.solverManager = SolverManager.create(solverFactory);
         this.solutionManager = SolutionManager.create(solverFactory);
+    }
+
+    //pairingApp에서 시작 시점을 주입하기 위한 메소드
+    public void setMethodStartTime(long startTime){
+        this.methodStartTime = startTime;
     }
 
     public void updateDataDirs() {
@@ -155,6 +160,10 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
     }
 
     public Solution_ solve(Solution_ problem) {
+
+        // 만약 pairingApp에서 시작 시점 안찍어줬으면 현재 시간으로 세팅
+        if (this.methodStartTime == 0) this.methodStartTime = System.currentTimeMillis();
+
         solveStartTime = System.currentTimeMillis();
         initSolutionTime = 0;
         bestScoreTime = 0;
@@ -170,23 +179,23 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
                 1L,
                 id -> problem, 
                 bestSolution -> {
-                    long elapsed = System.currentTimeMillis() - solveStartTime;
+                    long now = System.currentTimeMillis();
                     Score_ currentScore = solutionManager.update(bestSolution);
                     
-                    // 1. 초기해 생성 시점 기록 (첫 번째 호출 시)
+                    // 1. 첫 번째 best solution 리스너 호출 시점을 초기해 종료 시점으로 기록
                     if (initSolutionTime == 0) {
-                        initSolutionTime = elapsed;
+                        initSolutionTime = now;
                     }
 
                     // 2. 베스트 스코어 갱신 트래킹
                     if (lastBestScore.get() == null || currentScore.compareTo(lastBestScore.get()) > 0) {
                         lastBestScore.set(currentScore);
-                        bestScoreTime = elapsed;
+                        bestScoreTime = now - methodStartTime; // 전체 흐름 기준 상대 시간
                         bestScoreStep = currentStepCount;
                     }
                     
                     // 진행 로그 출력
-                    System.out.printf("[PROGRESS] %d,%s (Step: %d)%n", elapsed, currentScore, currentStepCount);
+                    System.out.printf("[PROGRESS] %d,%s (Step: %d)%n", (now - methodStartTime), currentScore, currentStepCount);
                     
                     this.setSolution(bestSolution);
                     currentStepCount++; // Iteration 카운트 증가
@@ -197,18 +206,22 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
 
         try {
             Solution_ finalSolution = solverJob.getFinalBestSolution();
-            long totalDuration = System.currentTimeMillis() - solveStartTime;
+            long solverEndPoint = System.currentTimeMillis();
             Score_ finalScore = solutionManager.update(finalSolution);
+            
+            // 계산 결과 리포트
             System.out.println("\n" + "=".repeat(60));
             System.out.println("            [ EXPERIMENT RESULT SUMMARY ]");
             System.out.println("=".repeat(60));
-            System.out.println(" 1. Solver Start Time       : " + new java.util.Date(solveStartTime));
-            System.out.println(" 2. Initial Solution Ready  : " + initSolutionTime + " ms");
-            System.out.println(" 3. Best Score Found Time   : " + bestScoreTime + " ms");
-            System.out.println(" 4. Best Score Found Step   : " + bestScoreStep + " iteration");
-            System.out.println(" 5. Final Solver End Time   : " + totalDuration + " ms");
-            System.out.println(" 6. Final Best Score        : " + finalScore);
-            System.out.println(" 7. Total Steps Processed   : " + currentStepCount + " iterations");
+            System.out.println(" 1. Initial Solution Start (startPoint) : " + methodStartTime); //초기해 생성 시작 시점
+            System.out.println(" 2. Initial Solution End (initEndPoint)  : " + initSolutionTime); //초기해 생성 종료 시점
+            System.out.println(" 3. Initialization Time (initTime)       : " + (initSolutionTime - methodStartTime) + " ms"); //초기해 생성 시간
+            System.out.println(" 4. Pure Solver Start (solverStart)      : " + initSolutionTime); //순수 solver 시작 시점
+            System.out.println(" 5. Pure Solver Time (pureSolverTime)    : " + (solverEndPoint - initSolutionTime) + " ms"); //순수 solver 시간
+            System.out.println(" 6. Total Solve Time (totalTime)         : " + (solverEndPoint - methodStartTime) + " ms"); //전체 solve 시간 (total time)
+            System.out.println(" 7. Best Score Found At (relative)       : " + bestScoreTime + " ms"); //베스트 스코어 도출 시점
+            System.out.println(" 8. Best Score Found At Step             : " + bestScoreStep); //베스트 스코어 도출 step
+            System.out.println(" 9. Final Best Score                     : " + finalScore); //최종 베스트 스코어
             System.out.println("=".repeat(60) + "\n");
             
             return finalSolution;

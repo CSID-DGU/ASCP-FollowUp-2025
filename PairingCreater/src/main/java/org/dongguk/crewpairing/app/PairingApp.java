@@ -28,6 +28,9 @@ public class PairingApp extends CommonApp<PairingSolution> {
             return;
         }
 
+        //실험 전체 시작 시점 기록
+        long experimentStart = System.currentTimeMillis();
+
         String dataDirPath = args[0];
         String dataDirName = args[1];
         Integer flightSize = Integer.valueOf(args[2]);
@@ -52,12 +55,16 @@ public class PairingApp extends CommonApp<PairingSolution> {
         SolutionBusiness<PairingSolution, ?> business = new PairingApp(dataDirPath, dataDirName, informationXlsxFile)
                 .init(flightSize, stepLimit, timeLimitMs).getSolutionBusiness();
 
+        
+        //비즈니스 로직에 시작 시점 전달
+        business.setMethodStartTime(experimentStart);       
+
         // 엑셀 데이터 로드
         business.openSolution(business.getInputFileList().stream()
                 .filter(f -> f.getName().equals(informationXlsxFile))
                 .findFirst().orElseThrow());
 
-        // [모드별 초기해 처리]
+        // [모드별 초기해 처리 및 생성 시작]
         if ("kbra".equals(mode)) {
             List<Flight> flightList = business.getSolution().getFlightList();
             List<Pairing> randomPairings = RandomPairingGenerator.generate(flightList, 4, 42L);
@@ -73,6 +80,7 @@ public class PairingApp extends CommonApp<PairingSolution> {
 
         // 최적화 시작
         business.solve(business.getSolution());
+
 
         // 결과 저장
         business.saveSolution(null);

@@ -16,6 +16,7 @@ import java.util.List;
 
 @Getter
 @Setter
+// init 메소드에서 timeLimitMs를 받아서 SolutionBusiness를 전달하는 구조
 public abstract class CommonApp<Solution_> extends LoggingMain {
     public static final String DATA_DIR_SYSTEM_PROPERTY = "org.dongguk.dataDir";
 
