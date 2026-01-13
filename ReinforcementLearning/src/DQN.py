@@ -1,3 +1,4 @@
+import sys
 import os
 import torch
 import collections
@@ -15,6 +16,9 @@ import openpyxl
 from datetime import datetime
 import csv
 
+import wandb
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Hyperparameters
 learning_rate = 0.005
@@ -43,9 +47,13 @@ class ReplayBuffer():
             s_prime_lst.append(s_prime)
             done_mask_lst.append([done_mask])
 
-        return torch.tensor(s_lst, dtype=torch.float), torch.tensor(a_lst), \
-               torch.tensor(r_lst), torch.tensor(s_prime_lst, dtype=torch.float), \
-               torch.tensor(done_mask_lst)
+        return (
+            torch.tensor(s_lst, dtype=torch.float, device=device),
+            torch.tensor(a_lst, device=device),
+            torch.tensor(r_lst, device=device),
+            torch.tensor(s_prime_lst, dtype=torch.float, device=device),
+            torch.tensor(done_mask_lst, device=device)
+        )
     
     def size(self):
         return len(self.buffer)
@@ -58,7 +66,10 @@ class Qnet(nn.Module):
         self.fc3 = nn.Linear(128, 2)
 
     def forward(self, x):
-        x = torch.tensor(x, dtype=torch.float32)
+        if not torch.is_tensor(x):
+            x = torch.tensor(x, dtype=torch.float32, device=device)
+        else:
+            x = x.to(device)
 
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
@@ -73,6 +84,7 @@ class Qnet(nn.Module):
             return out.argmax().item()
             
 def train(q, q_target, memory, optimizer):
+    losses = []
     for i in range(10):
         s, a, r, s_prime, done_mask = memory.sample(batch_size)
 
@@ -85,6 +97,10 @@ def train(q, q_target, memory, optimizer):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+        losses.append(loss.item())
+
+    return float(np.mean(losses)) if losses else None
 
 def print_xlsx(output, output_pairing_filename):
     workbook = openpyxl.Workbook()
@@ -126,12 +142,18 @@ def print_xlsx_tmp(n_epi, number, output_tmp, folder_path):
     file_path = os.path.join(folder_path, file_name)
 
     workbook.save(file_path)
+
 def main():
-    # 사용자로부터 실행할 데이터의 년월일, 에피소드 수, 실행 ID 입력 받기
-    month = input('Enter the month of the input file (e.g., 201406): ')
-    episodes = int(input('Enter the number of episodes to run: '))
-    excutionId = input('Enter the excution ID (eg., 20240704-1): ')
+    if len(sys.argv) != 4:
+        print("Usage: python DQN.py <YYYYMM> <episodes> <execution_id>")
+        sys.exit(1)
+
+    month = sys.argv[1]
+    episodes = int(sys.argv[2])
+    excutionId = sys.argv[3]
+
     current_directory = os.path.dirname(__file__)
+
 
     # 요구 디렉토리
     output_directory = os.path.join(current_directory, '../output')
@@ -145,6 +167,21 @@ def main():
     if not os.path.exists(models_directory):
         os.makedirs(models_directory)
 
+    wandb.init(
+        project="ASCP-DQN",
+        name=f"{month}_{episodes}_{excutionId}",
+        config={
+            "month": month,
+            "episodes": episodes,
+            "execution_id": excutionId,
+            "learning_rate": learning_rate,
+            "gamma": gamma,
+            "buffer_limit": buffer_limit,
+            "batch_size": batch_size,
+            "device": str(device),
+        }
+    )
+
     # 데이터 입력 받기
     path = os.path.abspath(os.path.join(current_directory, '../input'))
     readXlsx(path, f'/ASCP_Data_Input_{month}.xlsx')
@@ -156,8 +193,8 @@ def main():
 
     # Load Crew Pairing Environment
     env = CrewPairingEnv(V_f_list, flight_list, airport_total)
-    q = Qnet(NN_size)
-    q_target = Qnet(NN_size)
+    q = Qnet(NN_size).to(device)
+    q_target = Qnet(NN_size).to(device)
     q_target.load_state_dict(q.state_dict())
     memory = ReplayBuffer()
 
@@ -176,6 +213,10 @@ def main():
         time = datetime.now()
 
         for n_epi in range(episodes):
+            elapsed = datetime.now() - time
+            model_saved = 0
+            train_loss = None
+
             print(f"Episode {n_epi}, Time Elapsed: {datetime.now() - time}")
             epsilon = max(0.01, 0.08 - 0.01 * (n_epi / 200))  # Linear annealing from 8% to 1%
             s, _ = env.reset()  # V_p departure airport, V_f arrival airport
@@ -183,7 +224,11 @@ def main():
             output_tmp = []
             
             while not done:
-                a = q.sample_action(torch.from_numpy(np.array(s)).float(), epsilon)
+                a = q.sample_action(
+                    torch.from_numpy(np.array(s)).float().to(device),
+                    epsilon
+                )
+
                 s_prime, r, done, truncated, info, output_tmp = env.step(action=a)
 
                 done_mask = 0.0 if done else 1.0
@@ -193,7 +238,7 @@ def main():
                 score += r
             
             if memory.size() > 2000:
-                train(q, q_target, memory, optimizer)
+                train_loss = train(q, q_target, memory, optimizer)
 
             if best_score < score:
                 best_score = score
@@ -202,15 +247,41 @@ def main():
                 # Best Model이 갱신될 때 마다 models 디렉토리에 저장
                 torch.save(q.state_dict(), os.path.join(models_directory, f'dqn_model_{month}_{episodes}_{excutionId}.pth'))
                 print('Model Saved')
+                model_saved = 1
                 
             csvwriter.writerow([n_epi, f"{score:.2f}", f"{best_score:.2f}", f"{datetime.now() - time}"])
             print(f"Current Score: {score:.2f}, Best Score: {best_score:.2f}")
+
+            log_payload = {
+                "episode": n_epi,
+                "reward": float(score),
+                "best_score": float(best_score),
+                "epsilon": float(epsilon),
+                "elapsed_seconds": elapsed.total_seconds(),
+                "replay_size": memory.size(),
+                "model_saved": model_saved,
+            }
+            if train_loss is not None:
+                log_payload["train_loss"] = float(train_loss)
+
+            wandb.log(log_payload, step=n_epi)
                 
             score = 0
 
     env.close()
 
     # 최종 생성된 페어링을 xlsx로 ouput 디렉토리에 저장
-    print_xlsx(output, os.path.join(output_directory, f'output_pairing_{month}_{episodes}_{excutionId}.xlsx'))
+    output_xlsx = os.path.join(
+        output_directory,
+        f'output_pairing_{month}_{episodes}_{excutionId}.xlsx'
+    )
+    print_xlsx(output, output_xlsx)
 
-main()
+    # (선택) wandb에 결과 파일도 올리고 싶으면 주석 해제
+    wandb.save(output_xlsx)
+    wandb.save(logs_filename)
+
+    wandb.finish()
+
+if __name__ == "__main__":
+    main()
