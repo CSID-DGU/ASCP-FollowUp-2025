@@ -66,16 +66,14 @@ public class Pairing extends AbstractPersistable {
 
     /**
      *  페어링 모기지 출발 여부 확인
-     *  첫번째 Flight의 출발 공항이 HB1, HB2 둘 다 아니면 True 반환
+     *  DQN 로직에 따르면 어떤 비행이든 첫 출발지가 곧 그 페어링의 기지가 됨
      * @return boolean
      */
-    public boolean isNotDepartBase(){
-        if (pair.size() == 0) return false;
-
-        String originAirport = pair.get(0).getOriginAirport().getName();
-        if(!originAirport.equals("HB1") && !originAirport.equals("HB2")) return true;
-
-        return false;
+    public boolean isNotDepartBase() {
+        if (pair.isEmpty()) return false;
+        // DQN 로직에 따르면 어떤 비행이든 첫 출발지가 곧 그 페어링의 기지가 됨
+        // 따라서 첫 비행이 존재하기만 하면 기지 출발로 간주합니다.
+        return false; 
     }
 
     /**
@@ -144,6 +142,7 @@ public class Pairing extends AbstractPersistable {
      * @return boolean
      */
     public boolean isEqualBase() {
+        if (pair.isEmpty()) return false;
         String startAirport = pair.get(0).getOriginAirport().getName();
         String endAirport = pair.get(pair.size() - 1).getDestAirport().getName();
 
