@@ -333,6 +333,10 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
                 scheduler.shutdown();
             }
             System.out.println("[SOLVER END]");
+            saveSolution(outputDataDir);
+            System.out.println("[FINAL SAVED] runId=" + runId + ", time=" +
+                    new SimpleDateFormat("yyyyMMdd-HHmmss").format(new Date()));
+
 
             //DQN 초기해 생성은 solver 외부에서 수행되므로 제외
             System.out.println("Initial solution time(ms) = " + initialSolutionTimeMs);
