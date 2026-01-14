@@ -48,11 +48,19 @@ def update_state(V_p_list, V_f, idx) :
     V_p_list[idx] = V_p
 
 
-def get_reward(V_p_list, V_f, idx) :
+def get_reward(V_p_list, V_f, idx):
+    # current pairing summary: [t_ori, t_des, dur, a_ori, a_des, type]
     V_p = V_p_list[idx]
 
-    if V_p[3] == V_f[4] :
-        reward = 1
-    else : reward = 0
-        
+    start = V_p[3]
+    end_before = V_p[4]
+    end_after = V_f[4]   # after adding V_f, end becomes V_f's arrival
+
+    dh_before = 1 if (end_before != start) else 0
+    dh_after  = 1 if (end_after  != start) else 0
+
+    delta_N_dh = dh_after - dh_before
+
+    reward = -delta_N_dh
+
     return reward

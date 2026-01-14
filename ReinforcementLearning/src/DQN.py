@@ -200,8 +200,9 @@ def main():
 
     optimizer = optim.Adam(q.parameters(), lr=learning_rate)
 
-    score = -float('inf')
-    best_score = -float('inf')
+    score = 0
+    best_score = -INF
+
     output = [[] for _ in range(len(flight_list))]
 
     # 에피소드 별 리워드와 소요 시간을 기록하는 로그 파일(csv)을 logs에 저장
@@ -239,6 +240,9 @@ def main():
             
             if memory.size() > 2000:
                 train_loss = train(q, q_target, memory, optimizer)
+
+            if n_epi % 1 == 0:
+                q_target.load_state_dict(q.state_dict())
 
             if best_score < score:
                 best_score = score
