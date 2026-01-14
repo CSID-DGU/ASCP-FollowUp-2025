@@ -8,8 +8,11 @@ import org.optaplanner.core.api.solver.*;
 import org.optaplanner.core.api.solver.change.ProblemChange;
 import org.optaplanner.core.impl.score.director.InnerScoreDirector;
 import org.optaplanner.core.impl.solver.DefaultSolverFactory;
+import org.dongguk.common.persistence.AbstractXlsxSolutionFileIO;
 import org.optaplanner.core.impl.solver.change.DefaultProblemChangeDirector;
 import org.optaplanner.persistence.common.api.domain.solution.SolutionFileIO;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.dongguk.common.persistence.ExperimentMeta;
 import org.dongguk.crewpairing.persistence.FlightCrewPairingXlsxFileIO;
 import org.dongguk.crewpairing.persistence.FlightCrewPairingXlsxFileIO.FlightCrewPairingXlsxWriter;
 import org.slf4j.Logger;
@@ -69,6 +72,15 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
     private final DefaultSolverFactory<Solution_> solverFactory;
     private final SolverManager<Solution_, Long> solverManager;
     private final SolutionManager<Solution_, Score_> solutionManager;
+
+    // ===== experiment identification =====
+    private final String runId =
+        new SimpleDateFormat("yyyyMMdd-HHmmss-SSS").format(new Date())
+        + "-" + ProcessHandle.current().pid();
+
+    private String modeTag;
+    private final AtomicInteger exportSeq = new AtomicInteger(0);
+
 
     /**
      * 멀티 쓰레드 환경에서 동시성 보장을 위해 AtomicReference 사용하지 않음 -
@@ -146,6 +158,10 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
 
     public void setExternalInitialStartTimeMs(Long t) {
         this.externalInitialStartTimeMs = t;
+    }
+
+    public void setModeTag(String modeTag) {
+        this.modeTag = modeTag;
     }
 
     public void updateDataDirs() {
@@ -414,16 +430,35 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
         // 100분마다 페어링 데이터를 저장하는 작업
         scheduler.scheduleAtFixedRate(() -> {
             SimpleDateFormat dateFormat = new SimpleDateFormat("yyyyMMdd-HHmm");
-            String timeStr = dateFormat.format(new Date());
-            exportPairingData(timeStr); // export 메서드 호출
+            exportPairingData(); // export 메서드 호출
         }, 0, 100, TimeUnit.MINUTES);
     }
 
     // exportPairingData 메서드 정의
-    private void exportPairingData(String timeStr) {
-        FlightCrewPairingXlsxWriter writer = new FlightCrewPairingXlsxWriter((PairingSolution) getSolution());
-        writer.exportPairingData(timeStr);
+    private void exportPairingData() {
+        int seq = exportSeq.incrementAndGet();
+
+        String timestamp =
+            new SimpleDateFormat("yyyyMMdd-HHmmss").format(new Date());
+
+        String fileTag =
+            modeTag
+            + "__run-" + runId
+            + "__seq-" + String.format("%03d", seq)
+            + "__t-" + timestamp;
+
+        FlightCrewPairingXlsxWriter writer =
+            new FlightCrewPairingXlsxWriter(
+                (PairingSolution) getSolution(),
+                new ExperimentMeta(modeTag, runId, seq, timestamp)
+            );
+
+        File out =
+            new File(outputDataDir, fileTag + "-pairingData.xlsx");
+        writer.write(out);
+        LOGGER.info("Exported pairing data to: {}", out.getAbsolutePath());
     }
+
 
     private void writeLog(String logFilePath, String message) {
         long currentTime = System.currentTimeMillis();
@@ -486,9 +521,35 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
 
 
     public void saveSolution(File file) {
-        solutionFileIO.write(getSolution(), file);
-        LOGGER.info("Saved: CSV File");
+
+        String timestamp =
+            new SimpleDateFormat("yyyyMMdd-HHmmss").format(new Date());
+
+        String finalName =
+            modeTag
+            + "__run-" + runId
+            + "__FINAL"
+            + "__t-" + timestamp
+            + ".xlsx";
+
+        File finalFile =
+            new File(file.getParentFile(), finalName);
+
+        FlightCrewPairingXlsxWriter writer =
+            new FlightCrewPairingXlsxWriter(
+                (PairingSolution) getSolution(),
+                new ExperimentMeta(
+                    modeTag,
+                    runId,
+                    -1,
+                    timestamp
+                )
+            );
+
+        writer.write(finalFile);
     }
+
+
 
     private void acceptScoreDirector(Consumer<InnerScoreDirector<Solution_, Score_>> consumer) {
         applyScoreDirector(s -> {

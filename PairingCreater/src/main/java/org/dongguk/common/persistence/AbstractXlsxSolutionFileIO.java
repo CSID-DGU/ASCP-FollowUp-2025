@@ -7,7 +7,7 @@ import org.optaplanner.core.api.score.Score;
 import org.optaplanner.persistence.common.api.domain.solution.SolutionFileIO;
 
 import java.util.Iterator;
-
+import java.io.File;
 
 public abstract class AbstractXlsxSolutionFileIO<Solution_> implements SolutionFileIO<Solution_> {
 
@@ -54,12 +54,24 @@ public abstract class AbstractXlsxSolutionFileIO<Solution_> implements SolutionF
         }
     }
 
+    @Override
+    public final void write(Solution_ solution, File file) {
+        throw new UnsupportedOperationException(
+            "Use scheduler-based export or writer directly. saveSolution() is not for experiments."
+        );
+    }
+
+
     public static abstract class AbstractXlsxWriter<Solution_, Score_ extends Score<Score_>> {
         protected Solution_ solution;
-        public AbstractXlsxWriter(Solution_ solution, String solverConfigResource) {
+        protected ExperimentMeta meta;
+
+        public AbstractXlsxWriter(Solution_ solution, ExperimentMeta meta) {
             this.solution = solution;
+            this.meta = meta;
         }
 
-        public abstract void write();
+        public abstract void write(File file);
+
     }
 }

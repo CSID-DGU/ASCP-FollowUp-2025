@@ -79,10 +79,15 @@ public abstract class CommonApp<Solution_> extends LoggingMain {
         SolverConfig solverConfig = SolverConfig.createFromXmlResource(solverConfigResource);
         solverConfig.withMoveThreadCount("1");
 
-        TerminationConfig solverTermination = new TerminationConfig()
-            .withMillisecondsSpentLimit(timeLimitMs);
+        TerminationConfig solverTermination = new TerminationConfig();
+
+        if (timeLimitMs > 0) {
+            solverTermination = solverTermination
+                .withMillisecondsSpentLimit(timeLimitMs);
+        }
 
         solverConfig.setTerminationConfig(solverTermination);
+
 
 
         List<PhaseConfig> phaseConfigList = solverConfig.getPhaseConfigList();
@@ -91,10 +96,15 @@ public abstract class CommonApp<Solution_> extends LoggingMain {
                 if (phaseConfig instanceof LocalSearchPhaseConfig) {
                     LocalSearchPhaseConfig lsConfig = (LocalSearchPhaseConfig) phaseConfig;
                     
-                    TerminationConfig terminationConfig = new TerminationConfig()
+                    TerminationConfig terminationConfig = new TerminationConfig();
+
+                    if (stepLimit > 0) {
+                        terminationConfig = terminationConfig
                             .withStepCountLimit(stepLimit);
+                    }
 
                     lsConfig.setTerminationConfig(terminationConfig);
+
 
                 }
             }

@@ -9,6 +9,7 @@ import org.dongguk.crewpairing.app.PairingApp;
 import org.dongguk.crewpairing.domain.*;
 import org.dongguk.crewpairing.domain.factory.DomainFactory;
 import org.optaplanner.core.api.score.buildin.hardsoft.HardSoftScore;
+import org.dongguk.common.persistence.ExperimentMeta;
 
 import java.io.*;
 import java.time.LocalDateTime;
@@ -47,11 +48,6 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
             e.printStackTrace();
             throw new RuntimeException(e);
         }
-    }
-
-    @Override
-    public void write(PairingSolution pairingSolution, File file) {
-        new FlightCrewPairingXlsxWriter(pairingSolution).write();
     }
 
     @Getter
@@ -265,8 +261,11 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
         @Getter
         public static class FlightCrewPairingXlsxWriter extends AbstractXlsxWriter<PairingSolution, HardSoftScore> {
 
-            public FlightCrewPairingXlsxWriter(PairingSolution pairingSolution) {
-                super(pairingSolution, "runtime");
+            public FlightCrewPairingXlsxWriter(
+                    PairingSolution pairingSolution,
+                    ExperimentMeta meta
+            ) {
+                super(pairingSolution, meta);
             }
 
             // @Override
@@ -292,23 +291,25 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
             //     }
             //     scanner.close();
             // }
-            @Override
-            public void write() {
-                String timeStr = LocalDateTime.now()
-                        .format(DateTimeFormatter.ofPattern("yyyy_MM_dd_HH_mm_ss"));
 
-                exportPairingData(timeStr);
+            @Override
+            public void write(File file) {
+                exportPairingData(file);
             }
 
-            public void exportPairingData(String timeStr) {
-                String fileName = timeStr + "-pairingData.xlsx";
+
+            public void exportPairingData(File file) {
 
                 try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+
+                    // ===== META 시트 먼저 작성 =====
+                    writeMetaSheet(workbook);
+
+                    // ===== 기존 Data 시트 =====
                     XSSFSheet sheet = workbook.createSheet("Data");
 
                     List<Pairing> pairingList = solution.getPairingList();
 
-                    //Pairing index 셀 스타일(우측 테두리)
                     CellStyle rightBorder = workbook.createCellStyle();
                     rightBorder.setAlignment(HorizontalAlignment.CENTER);
                     rightBorder.setBorderRight(BorderStyle.THIN);
@@ -317,33 +318,56 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
                     Cell cell = row.createCell(0);
                     cell.setCellValue("Pairing Data");
 
-                    //Pairing data 테이블
                     int rowIdx = 1;
-                    for(Pairing pairing : pairingList){
+                    for (Pairing pairing : pairingList) {
                         row = sheet.createRow(rowIdx);
                         cell = row.createCell(0);
-                        cell.setCellValue(rowIdx-1);
+                        cell.setCellValue(rowIdx - 1);
                         cell.setCellStyle(rightBorder);
 
-                        for(int i=0; i<pairing.getPair().size(); i++){
-                            cell = row.createCell(i+1);
+                        for (int i = 0; i < pairing.getPair().size(); i++) {
+                            cell = row.createCell(i + 1);
                             cell.setCellValue(pairing.getPair().get(i).getId());
                         }
                         rowIdx++;
                     }
 
-                    try (FileOutputStream fo = new FileOutputStream("./data/crewpairing/output/" + fileName)) {
+                    try (FileOutputStream fo =
+                                new FileOutputStream(file)) {
                         workbook.write(fo);
                     }
-                }catch (IOException e){
+                } catch (IOException e) {
                     e.printStackTrace();
                 }
 
-                System.out.println("Create Output File : " + fileName);
+                System.out.println("Create Output File : " + file.getAbsolutePath());
             }
 
-            public void exportUserData(String timeStr) {
-                String fileName = timeStr + "-userData1.xlsx";
+            private void writeMetaSheet(XSSFWorkbook workbook) {
+                XSSFSheet metaSheet = workbook.createSheet("META");
+
+                int r = 0;
+                Row row;
+
+                row = metaSheet.createRow(r++);
+                row.createCell(0).setCellValue("modeTag");
+                row.createCell(1).setCellValue(meta.modeTag);
+
+                row = metaSheet.createRow(r++);
+                row.createCell(0).setCellValue("runId");
+                row.createCell(1).setCellValue(meta.runId);
+
+                row = metaSheet.createRow(r++);
+                row.createCell(0).setCellValue("exportSeq");
+                row.createCell(1).setCellValue(meta.exportSeq);
+
+                row = metaSheet.createRow(r++);
+                row.createCell(0).setCellValue("timestamp");
+                row.createCell(1).setCellValue(meta.timestamp);
+            }
+
+
+            public void exportUserData(File file) {
                 try (XSSFWorkbook workbook = new XSSFWorkbook()) {
                     XSSFSheet sheet = workbook.createSheet("Data");
 
@@ -446,7 +470,7 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
                         }
                     }
 
-                    try (FileOutputStream fo = new FileOutputStream("./data/crewpairing/output/" + fileName)) {
+                    try (FileOutputStream fo = new FileOutputStream(file)) {
                         workbook.write(fo);
                     }
                 } catch (IOException e) {
@@ -454,8 +478,7 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
                 }
             }
 
-            public void exportUserData2(String timeStr) {
-                String fileName = timeStr + "-userData2.xlsx";
+            public void exportUserData2(File file) {
                 try (XSSFWorkbook workbook = new XSSFWorkbook()) {
                     XSSFSheet sheet = workbook.createSheet("Data");
 
@@ -534,7 +557,7 @@ public class FlightCrewPairingXlsxFileIO extends AbstractXlsxSolutionFileIO<Pair
                         cell.setCellStyle(headerStyle);
                     }
 
-                    try (FileOutputStream fo = new FileOutputStream("./data/crewpairing/output/" + fileName)) {
+                    try (FileOutputStream fo = new FileOutputStream(file)) {
                         workbook.write(fo);
                     }
                 } catch (IOException e) {

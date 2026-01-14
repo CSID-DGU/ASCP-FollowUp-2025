@@ -14,6 +14,8 @@ import org.optaplanner.persistence.common.api.domain.solution.SolutionFileIO;
 import org.dongguk.crewpairing.util.RandomPairingGenerator;
 
 import java.util.*;
+import java.io.File;
+
 
 @Slf4j
 public class PairingApp extends CommonApp<PairingSolution> {
@@ -36,11 +38,29 @@ public class PairingApp extends CommonApp<PairingSolution> {
                 "DQN mode requires: [pairing.xlsx] <iteration> <timeLimitMs>"
             );
         }
+        
+        String solverConfigResource = args[2];
+        // ===== solver strategy 판별 =====
+        String solverConfig = solverConfigResource.toLowerCase();
 
+        String strategy;
+        if (solverConfig.contains("-ts")) {
+            strategy = "ts";
+        } else if (solverConfig.contains("-hc")) {
+            strategy = "hc";
+        } else if (solverConfig.contains("-gd")) {
+            strategy = "gd";
+        } else {
+            strategy = "unknown";
+        }
+
+        // 최종 방식 태그 (예: opis-hc, kbra-ts)
+        String modeTag = mode + "-" + strategy;
+                System.out.println("Mode Tag  = " + modeTag);
+                System.out.println("================================");
 
         String dataDirPath = args[0];
         String dataDirName = args[1];
-        String solverConfigResource = args[2];
         Integer flightSize = Integer.valueOf(args[3]);
         String informationXlsxFile = args[4];
 
@@ -71,6 +91,12 @@ public class PairingApp extends CommonApp<PairingSolution> {
                 );
         }
 
+        if (stepLimit <= 0 && timeLimitMs <= 0) {
+            throw new IllegalArgumentException(
+                "At least one termination condition (iteration or time) must be > 0"
+            );
+        }
+
         System.out.println("================================");
         System.out.println("Mode       = " + mode);
         System.out.println("Iteration  = " + stepLimit);
@@ -85,6 +111,8 @@ public class PairingApp extends CommonApp<PairingSolution> {
         assert flightSize != null;
         SolutionBusiness<PairingSolution, ?> business = new PairingApp(dataDirPath, dataDirName, solverConfigResource, informationXlsxFile)
                 .init(flightSize, stepLimit, timeLimitMs).getSolutionBusiness();
+        
+        business.setModeTag(modeTag);
 
         business.setTimeLimitMs(timeLimitMs);
         business.setOpisMode("opis".equals(mode));
@@ -163,7 +191,13 @@ public class PairingApp extends CommonApp<PairingSolution> {
 
         // Output Excel File
         System.out.println("save...");
-        business.saveSolution(null);
+        // solver 실행
+        File finalOut =
+            new File(
+                business.getOutputDataDir(),
+                modeTag + "__run-" + business.getRunId() + "__FINAL.xlsx"
+            );
+        business.saveSolution(finalOut);
         System.out.println("done");
 
         System.exit(0);
