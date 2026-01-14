@@ -324,6 +324,10 @@ public final class SolutionBusiness<Solution_, Score_ extends Score<Score_>> imp
         } catch (ExecutionException e) {
             throw new IllegalStateException("Solver threw an exception.", e);
         } finally {
+            if (exportSeq.get() == 0) {
+                exportPairingData(); // fallback
+            }
+
             solverJobRef.set(null);
             if (scheduler != null) {
                 scheduler.shutdown();
